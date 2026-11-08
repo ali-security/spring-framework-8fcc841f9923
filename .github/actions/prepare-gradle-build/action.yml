@@ -23,7 +23,32 @@ inputs:
 runs:
   using: composite
   steps:
+    # Liberica tarballs are fetched from BellSoft's own CDN: the GitHub release
+    # assets setup-java downloads (github.com/bell-sw/Liberica/releases) return a
+    # persistent HTTP 504. Versions are the ones setup-java resolved as latest.
+    - name: Set Up Java (Liberica from BellSoft CDN)
+      if: ${{ inputs.java-early-access != 'true' && (inputs.java-distribution || 'liberica') == 'liberica' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        declare -A rel=( [17]=17.0.21+11 [21]=21.0.13+11 [25]=25.0.5+11 )
+        declare -A sha=( [17]=b12addf5ad68ac48d22be8d2bd7e7384840b0cdb [21]=3832573962143033ee34aa480620f95720ee1839 [25]=923467abb79d370713194f4a05a6a565c8b98103 )
+        main=${{ inputs.java-version }}
+        default=${{ inputs.java-toolchain == 'true' && '17' || inputs.java-version }}
+        for v in $(echo "$main $default" | tr ' ' '\n' | sort -u); do
+          r=${rel[$v]}
+          f="$RUNNER_TEMP/bellsoft-jdk$r-linux-amd64.tar.gz"
+          curl -fsSL --retry 5 --retry-all-errors -o "$f" "https://download.bell-sw.com/java/$r/bellsoft-jdk$r-linux-amd64.tar.gz"
+          echo "${sha[$v]}  $f" | sha1sum -c -
+          mkdir -p "$RUNNER_TEMP/jdk-$v"
+          tar -xzf "$f" -C "$RUNNER_TEMP/jdk-$v" --strip-components=1
+          echo "JAVA_HOME_${v}_X64=$RUNNER_TEMP/jdk-$v" >> "$GITHUB_ENV"
+        done
+        echo "JAVA_HOME=$RUNNER_TEMP/jdk-$default" >> "$GITHUB_ENV"
+        echo "$RUNNER_TEMP/jdk-$default/bin" >> "$GITHUB_PATH"
+        "$RUNNER_TEMP/jdk-$default/bin/java" -version
     - name: Set Up Java
+      if: ${{ !(inputs.java-early-access != 'true' && (inputs.java-distribution || 'liberica') == 'liberica') }}
       uses: actions/setup-java@v5
       with:
         distribution: ${{ inputs.java-early-access == 'true' && 'temurin' || (inputs.java-distribution || 'liberica') }}
